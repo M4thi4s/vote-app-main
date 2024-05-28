@@ -1,0 +1,29 @@
+all:
+  hosts:
+    PrimaryVM:
+      ansible_host: 34.71.37.25
+      ansible_user: "{{ lookup('env', 'USER') }}"
+      ansible_port: 22
+      ansible_ssh_private_key_file: "{{ lookup('env', 'HOME') }}/.ssh/google_compute_engine"
+      postgres_password: "postgres"
+      postgres_user: "postgres"
+      db_name: "postgres"
+      shared_buffers_fixed_value: "256MB"
+      postgresql_mode: "primary"
+      postgresql_standby_ip: 34.16.102.135
+      replicator_username: "replicator"
+      replicator_password: "replicator"
+
+    StandbyVM:
+      ansible_host: 34.16.102.135
+      ansible_user: "{{ lookup('env', 'USER') }}"
+      ansible_port: 22
+      ansible_ssh_private_key_file: "{{ lookup('env', 'HOME') }}/.ssh/google_compute_engine"
+      postgres_password: "postgres"
+      postgres_user: "postgres"
+      db_name: "postgres"
+      shared_buffers_fixed_value: "256MB"
+      postgresql_mode: "standby"
+      postgresql_master_ip: 34.71.37.25
+      replicator_username: "replicator"
+      replicator_password: "replicator"

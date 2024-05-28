@@ -1,0 +1,123 @@
+version: '3.8'
+
+services:
+  vote1:
+    image: europe-west9-docker.pkg.dev/vote-app/voting-images/vote
+    build: 
+      context: ../vote
+    ports:
+      - "5001:5000"
+    depends_on:
+      - redis
+    networks:
+      - front-net
+      - back-net
+
+  vote2:
+    build: 
+      context: ../vote
+    ports:
+      - "5002:5000"
+    depends_on:
+      - redis
+    networks:
+      - front-net
+      - back-net
+      
+  vote3:
+    build: 
+      context: ../vote
+    ports:
+      - "5003:5000"
+    depends_on:
+      - redis
+    networks:
+      - front-net
+      - back-net
+
+  result:
+    image: europe-west9-docker.pkg.dev/vote-app/voting-images/result
+    build: 
+      context: ../result
+    ports:
+      - "4000:4000"
+    depends_on:
+      - db
+    networks:
+      - front-net
+      - back-net
+
+  worker:
+    image: europe-west9-docker.pkg.dev/vote-app/voting-images/worker
+    build:
+      context: ../worker
+      args:
+        TARGETPLATFORM : linux/amd64
+        TARGETARCH : x64
+        BUILDPLATFORM : linux/amd64
+    depends_on:
+      - redis
+      - db
+    networks:
+      - back-net
+
+  redis:
+    image: redis:alpine
+    command: redis-server
+    volumes:
+      - ../healthchecks:/healthchecks
+    healthcheck:
+      test: [ "CMD-SHELL", "sh /healthchecks/redis.sh" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - back-net
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ../healthchecks:/healthchecks
+    healthcheck:
+      test: ["CMD-SHELL", "sh /healthchecks/postgres.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - back-net
+
+  loadbalancer: 
+    image: europe-west9-docker.pkg.dev/vote-app/voting-images/nginx
+    build:
+      context: ../nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - vote1
+      - vote2
+      - vote3
+    networks:
+      - front-net
+
+  seed:
+    image: europe-west9-docker.pkg.dev/vote-app/voting-images/seed
+    build:
+      context: ../seed-data
+    depends_on:
+      - vote1
+      - vote2
+      - vote3
+      - loadbalancer
+    networks:
+      - front-net
+
+volumes:
+  db-data:
+
+networks:
+  front-net:
+  back-net:

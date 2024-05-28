@@ -1,0 +1,15 @@
+---
+
+- name: list os version
+  hosts: test
+  become: true
+
+  tasks:
+    - name: Dump DB
+      shell: "PGPASSWORD='{{ postgres_password }}' pg_dump -h 127.0.0.1 -U {{ postgres_user }} -d {{ db_name }}"
+      register: myshell_output
+    - name: copy the output to a local file
+      copy:
+        content: "{{ myshell_output.stdout }}"
+        dest: "~/output.txt"
+      delegate_to: localhost

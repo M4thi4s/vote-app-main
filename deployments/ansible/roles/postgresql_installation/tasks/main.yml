@@ -1,0 +1,112 @@
+---
+- name: Installer les paquets nécessaires pour PostgreSQL
+  apt:
+    name:
+      - postgresql-15
+      - python3-psycopg2
+    state: present
+  become: yes
+
+- name: Démarrer le service PostgreSQL
+  service:
+    name: postgresql@15-main
+    state: started
+  become: yes
+
+- name: Créer une base de données 'postgres'
+  postgresql_db:
+    name: postgres
+  become_user: postgres
+
+- name: Créer l'utilisateur '{{ postgres_user }}' avec un mot de passe
+  postgresql_user:
+    db: "{{ db_name }}"
+    name: "{{ postgres_user }}"
+    password: "{{ postgres_password }}"
+  become_user: postgres
+
+- name: Accorder tous les privilèges à l'utilisateur '{{ postgres_user }}' sur toutes les bases de données
+  postgresql_privs:
+    type: database
+    database: postgres
+    privs: ALL
+    roles: "{{ postgres_user }}"
+  become_user: postgres
+
+- name: Obtenir le chemin du fichier pg_hba.conf
+  postgresql_query:
+    query: SHOW hba_file;
+  register: pg_hba_file
+  become_user: postgres
+  
+- name: Afficher le chemin pg_hba.conf
+  debug:
+    msg: "Le chemin de pg_hba.conf est {{ pg_hba_file.query_result[0].hba_file }}"
+  become_user: postgres
+  
+- name: Configure pg_hba.conf access for user '{{ postgres_user }}'
+  postgresql_pg_hba:
+    contype: host
+    databases: all
+    users: "{{ postgres_user }}"
+    address: all
+    method: md5
+    dest: "{{ pg_hba_file.query_result[0].hba_file }}"
+  notify: Restart postgresql
+  become_user: postgres
+  changed_when: true  # Test, à enlever en production
+
+- name: Modifier la configuration de PostgreSQL pour écouter sur toutes les interfaces
+  postgresql_set:
+    name: listen_addresses
+    value: '*'
+  become_user: postgres
+
+# Partie 3
+# Modifier la configuration système pour vm.vfs_cache_pressure
+
+- name: Set vm.vfs_cache_pressure to 90
+  ansible.builtin.sysctl:
+    name: vm.vfs_cache_pressure
+    value: '90'
+    state: present
+    reload: yes
+    sysctl_set: yes
+    ignoreerrors: yes
+
+- name: Ensure vm.vfs_cache_pressure is persisted
+  ansible.builtin.lineinfile:
+    path: /etc/sysctl.conf
+    line: 'vm.vfs_cache_pressure=90'
+    create: yes
+    state: present
+
+# Modifier la configuration logicielle pour PostgreSQL shared_buffers
+
+- name: Set PostgreSQL shared_buffers
+  ansible.builtin.lineinfile:
+    path: /etc/postgresql/15/main/postgresql.conf
+    regexp: '^#?shared_buffers'
+    line: "shared_buffers = {{ shared_buffers_fixed_value }}"  # À ajuster selon la mémoire disponible
+    backrefs: yes
+    state: present
+  notify: Restart postgresql
+
+# Automatisation grâce aux facts pour déterminer la valeur de shared_buffers
+
+- name: Calculate shared_buffers based on available memory
+  set_fact:
+    shared_buffers: "{{ ((ansible_memtotal_mb * 0.25) | int) | string + 'MB' if ansible_memtotal_mb > 1024 else '128MB' }}"
+
+- name: Debug shared_buffers before setting
+  debug:
+    msg: "Calculated shared_buffers value is {{ shared_buffers }} based on the available memory"
+
+- name: Set dynamic shared_buffers in PostgreSQL config
+  ansible.builtin.lineinfile:
+    path: /etc/postgresql/15/main/postgresql.conf
+    regexp: '^#?shared_buffers'
+    line: "shared_buffers = {{ shared_buffers }}"
+    backrefs: yes
+    state: present
+  notify: Restart postgresql

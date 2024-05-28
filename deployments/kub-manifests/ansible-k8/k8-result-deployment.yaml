@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: result-deployment
+  namespace: db-replica
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: result
+  template:
+    metadata:
+      labels:
+        app: result
+    spec:
+      containers:
+      - name: result
+        image: europe-west9-docker.pkg.dev/vote-app/voting-images/result
+        ports:
+        - containerPort: 4000

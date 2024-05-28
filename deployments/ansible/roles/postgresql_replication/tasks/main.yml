@@ -1,0 +1,131 @@
+---
+- name: Configuration commune pour les nœuds primary et standby
+  block:
+    - name: Créer un utilisateur de réplication
+      postgresql_user:
+        name: "{{ replicator_username }}"
+        password: "{{ replicator_password }}"
+        role_attr_flags: REPLICATION
+        state: present
+      become_user: postgres
+
+    # Récupérer le chemin du fichier pg_hba.conf
+    - name: Obtenir le chemin du fichier pg_hba.conf
+      postgresql_query:
+        query: SHOW hba_file;
+      register: pg_hba_file
+      become_user: postgres
+      
+    - name: Afficher le chemin pg_hba.conf
+      debug:
+        msg: "Le chemin de pg_hba.conf est {{ pg_hba_file.query_result[0].hba_file }}"
+      become_user: postgres
+
+    - name: Accorder le droit de connexion à l'utilisateur replicator
+      postgresql_pg_hba:
+        contype: host
+        databases: replication
+        users: "{{ replicator_username }}"
+        address: "all"
+        method: md5
+        dest: "{{ pg_hba_file.query_result[0].hba_file }}"
+      notify: Restart postgresql
+
+#- name: Actions supplémentaires pour le nœud primary - inutile pour l'instant
+#  when: postgresql_mode == "primary"
+#  block:
+
+- name: Configuration additionnelle pour le nœud standby
+  when: postgresql_mode == "standby"
+  block:
+    - name: Définir les paramètres PostgreSQL pour la réplication
+      postgresql_set:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+      with_items:
+        - { name: "listen_addresses", value: "0.0.0.0" }  
+        - { name: "wal_level", value: "replica" }
+        - { name: "max_wal_senders", value: "10" }
+        - { name: "hot_standby", value: "on" }
+      become_user: postgres
+
+    - name: Create .pgpass for PostgreSQL authentication
+      ansible.builtin.template:
+        src: pgpass.j2
+        dest: "/var/lib/postgresql/.pgpass" 
+        owner: postgres
+        group: postgres
+        mode: '0600'
+      vars:
+        postgresql_master_ip: "{{ hostvars['PrimaryVM'].ansible_host }}" 
+        replicator_username: "{{ hostvars['PrimaryVM'].replicator_username }}"
+        replicator_password: "{{ hostvars['PrimaryVM'].replicator_password }}" 
+
+    - name: Fetch PostgreSQL data directory path
+      block:
+        - name: Fetch PostgreSQL data directory path
+          postgresql_query:
+            query: SHOW data_directory;
+          register: pg_data_dir
+          become_user: postgres
+        
+        - name: Store the data directory in a variable
+          set_fact:
+            postgresql_data_dir: "{{ pg_data_dir.query_result[0].data_directory }}"
+
+        - name: Display the data directory path
+          debug:
+            msg: "The data directory path is {{ postgresql_data_dir }}"
+          become_user: postgres
+
+    - name: Stop PostgreSQL service before modifying data directory
+      service:
+        name: postgresql
+        state: stopped
+
+    - name: Clear the data directory to prepare for replication
+      shell: rm -rf {{ postgresql_data_dir }}/*
+      become: yes
+      become_user: postgres
+      ignore_errors: yes
+
+    - name: Check if the data directory is deleted
+      stat:
+        path: "{{ pg_data_dir }}"
+      register: data_dir_status
+      failed_when: false
+
+    - name: Recreate the data directory
+      file:
+        path: "{{ pg_data_dir }}"
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: '0700'
+
+    - name: Afficher la commande pg_basebackup avant exécution
+      debug:
+        msg: >
+          pg_basebackup -h {{ hostvars['PrimaryVM'].ansible_host }} -U {{ hostvars['PrimaryVM'].replicator_username }} -p 5432 -D {{ postgresql_data_dir }} -X stream -R -v
+          PGPASSFILE = /var/lib/postgresql/.pgpass
+    
+    - name: Exécuter pg_basebackup pour initialiser la réplication
+      command: >
+        pg_basebackup -h {{ hostvars['PrimaryVM'].ansible_host }} -U {{ hostvars['PrimaryVM'].replicator_username }} -p 5432 -D {{ postgresql_data_dir }} -X stream -R -v
+      environment:
+        PGPASSFILE: "/var/lib/postgresql/.pgpass"
+      become_user: postgres
+      become: yes
+      
+      
+    - name: Nettoyer après la configuration
+      block:
+        - name: Supprimer le fichier .pgpass
+          file:
+            path: "/tmp/.pgpass"
+            state: absent
+
+        - name: Démarrer le service PostgreSQL
+          service:
+            name: postgresql
+            state: started

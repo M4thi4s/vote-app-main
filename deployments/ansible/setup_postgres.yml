@@ -1,0 +1,6 @@
+---
+- name: Installer et configurer PostgreSQL
+  hosts: all
+  become: yes
+  roles:
+    - postgresql_installation

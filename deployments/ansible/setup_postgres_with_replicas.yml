@@ -1,0 +1,24 @@
+---
+- name: Installer et configurer PostgreSQL
+  hosts: all
+  become: yes
+  roles:
+    - postgresql_installation
+
+- name: Configurer la réplication PostgreSQL en mode primaire
+  hosts: PrimaryVM
+  become: yes
+  roles:
+    - role: postgresql_replication
+      vars:
+        postgresql_mode: "primary"
+        postgresql_standby_ip: "{{ hostvars['StandbyVM'].ansible_host }}"  
+
+- name: Configurer la réplication PostgreSQL en mode standby
+  hosts: StandbyVM
+  become: yes
+  roles:
+    - role: postgresql_replication
+      vars:
+        postgresql_mode: "standby"
+        postgresql_master_ip: "{{ hostvars['PrimaryVM'].ansible_host }}" 

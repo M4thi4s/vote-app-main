@@ -1,0 +1,32 @@
+---
+- name: Backup and fetch PostgreSQL database dump
+  hosts: vm1
+  become: yes
+  become_user: postgres
+  vars:
+    dump_file: "/tmp/{{ ansible_date_time.iso8601_basic_short }}_backup.sql"
+
+  tasks:
+    - name: Create a dump of the PostgreSQL database
+      community.postgresql.postgresql_db:
+        name: "{{ db_name }}"
+        state: dump
+        target: "{{ dump_file }}"
+        login_host: localhost
+        login_user: "{{ postgres_user }}"
+        login_password: "{{ postgres_password }}"
+
+    - name: Fetch the database dump to the local machine
+      fetch:
+        src: "{{ dump_file }}"
+        dest: "./backups/{{ inventory_hostname }}/"
+        flat: yes
+
+    - name: Remove the dump file on the remote server
+      file:
+        path: "{{ dump_file }}"
+        state: absent
+
+
+# Démarrer un dump de la DB vers le SSH et enregistrer dans un fichier local sur la machine qui initialise la connexion SSH
+# Bien veiller à ce que la sortie vers le serial ne prenne pas toute la RAM (buffer-size)
